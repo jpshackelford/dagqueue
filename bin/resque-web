@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift File.expand_path(File.dirname(__FILE__) + '/../lib')
+begin
+  require 'vegas'
+rescue LoadError
+  require 'rubygems'
+  require 'vegas'
+end
+require 'resque/server'
+
+
+Vegas::Runner.new(Resque::Server, 'resque-web', {
+  :before_run => lambda {|v|
+    path = (ENV['RESQUECONFIG'] || v.args.first)
+    load path.to_s.strip if path
+  }
+}) do |runner, opts, app|
+  opts.on('-N NAMESPACE', "--namespace NAMESPACE", "set the Redis namespace") {|namespace|
+    runner.logger.info "Using Redis namespace '#{namespace}'"
+    Resque.redis.namespace = namespace
+  }
+  opts.on("--redis-port PORT", "set the Redis port") {|port|
+    runner.logger.info "Using Redis port #{port}"
+    Resque.redis = "redis://127.0.0.1:#{port}/0"
+  }
+end

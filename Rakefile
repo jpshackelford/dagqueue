@@ -1,7 +1,7 @@
 unless defined?(Bundler)
   begin
     require 'bundler'
-    Bundler.require(:development)
+    Bundler.require(:development, :default)
   rescue LoadError => e
     puts e
     puts <<-EOM

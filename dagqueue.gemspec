@@ -25,13 +25,16 @@ EOM
   s.require_paths = ["lib"]
 
   #  s.files            += Dir.glob("bin/**/*")
-  #  s.executables       = [ "resque", "resque-web" ]
+  #  s.executables       = [ "resque, "resque-web" ]
 
   s.test_files    = Dir.glob("spec/**/*")
 
   s.extra_rdoc_files  = [ "LICENSE", "README.md", "HISTORY.md" ]
   s.rdoc_options      = ["--charset=UTF-8"]
 
-  s.add_dependency 'resque', '~> 1.17.0'
+  s.add_dependency 'resque',        '~> 1.17.1'
+  s.add_dependency 'redis',         '~> 2.2.0'
+  s.add_dependency 'redis-objects', '~> 0.5.1'
+  s.add_dependency 'rgl',           '~> 0.4.0'
 
 end

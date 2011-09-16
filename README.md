@@ -45,18 +45,56 @@ Example usage:
       end
     end
 
-    lot = Dagqueue::Lot.new('a-queue-name')
+    dag = Dagqueue::Dag.new('dag-name', 'a-queue-name')
     job_a, job_b, job_c =  MyJob.new, MyJob.new, MyJob.new
 
-    lot.job( job_b ).requires( job_a ) # A silly example.
-    lot.job( job_c ).requires( job_a ) # Dagqueue can handle thousands of
-    lot.job( job_b ).requires( job_c ) # complex dependency relationships.
+    dag.job( job_b ).requires( job_a ) # A silly example.
+    dag.job( job_c ).requires( job_a ) # Dagqueue can handle thousands of
+    dag.job( job_b ).requires( job_c ) # complex dependency relationships.
 
-    Dagqueue.enqueue( lot )
+    Dagqueue.enqueue( dag )
 
     # Worker
     worker = Dagqueue::Worker.new('a-queue-name')
     worker.very_verbose = true
     worker.work 5
+
+    # Results
+    dag = Dag.find('dag-name')
+    dag.percent_complete
+    dag.jobs( :successful ) # :waiting, :failed, :skipped, :completed,
+                            # :in_progress, :queued, :waiting-resource,
+                            # :waiting-dependency
+    dag.failed?
+    dag.succeeded?
+    dag.start_time
+    dag.stop_time
+    dag.run_duration
+    dag.size
+
+    dag.abort!             # Mark all incomplete jobs (except those currently
+                           # in the hands of workers, as skipped.)
+
+    dag.expire_metadata!   # Ensure that all meta-data is removed from redis
+                           # upon completion of dag jobs.
+
+    dag.preserve_metadata! # Keep meta-data after dag is complete.
+
+    dag.to_json            # Support for serializing dag results for
+    dag.from_json( json )  # later use.
+
+    job.host               # You can see where in-progress jobs
+    job.pid                # are running!
+
+    # Hooks for your use!
+    dag.started!
+                        job.queued!
+    dag.waiting!        job.waiting!  # for an external resource
+                        job.in_progress! # called just before perform
+    dag.aborted!
+                        job.skipped!
+    dag.complete!       job.complete!
+    dag.failed!         job.failed!
+    dag.succeeded!      job.succeeded!
 
 [rq]: http://github.com/defunkt/resque

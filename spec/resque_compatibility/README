@@ -1,0 +1,10 @@
+This is a port of existing Resque tests to RSpec with minor modifications for
+the purpose of ensuring that Dagque objects which subclass Resque objects
+maintain API compatibility.
+
+We are especially interested in ensuing that the Dagqueue worker is compatible
+with Resque jobs and queues and can be used for both.
+
+No attempt is made for Dagqueue to work with the existing Rake tasks. Dagqueue
+ships with its own scripts for running the Dagqueue workers daemonized.
+
