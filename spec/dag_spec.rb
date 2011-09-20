@@ -118,7 +118,7 @@ describe Dag do
       jobs = @tasks.map { |j| j.unique_id }
 
       # Complete the first job (other jobs depend on it) so that all others can be queued
-      @dag.completed( jobs.shift )
+      @dag.completed(jobs.shift)
 
       # All other jobs are working and there is nothing in planned
       jobs.each { |j| @dag.dequeue }
@@ -132,16 +132,16 @@ describe Dag do
       @tasks.map { |j| j.unique_id }.each { |j| @dag.completed(j) }
 
       # Be sure this works even when we don't rely on any state in Dag itself
-      dag = Dag.find( @dag.unique_id )
+      dag = Dag.find(@dag.unique_id)
       dag.should be_complete
     end
 
     it "calculates percent complete only on completed jobs" do
-      @dag.completed( @tasks.first.unique_id ) # 1 of 4 complete
-      2.times{ @dag.dequeue } # working jobs don't count toward completion
+      @dag.completed(@tasks.first.unique_id) # 1 of 4 complete
+      2.times { @dag.dequeue }               # working jobs don't count toward completion
 
       # Be sure this works even when we don't rely on any state in Dag itself
-      dag = Dag.find( @dag.unique_id )
+      dag = Dag.find(@dag.unique_id)
       dag.percent_complete.should == 25.0
     end
 
@@ -159,22 +159,67 @@ describe Dag do
     it "operations on a finalized dag are rational"
 
     it "provides hooks for plugins--especially for finalizing the dag"
-    
+
   end
 
-  context "when constructed with a block" do
-    it "adds tasks that are associated with the dag" do
+  context "when constructed with a block and depends_on" do
 
-      tasks = []
-      dag = Dag.new do |dag|
-        tasks << dag.add_task(Task, 'payload_1')
-        tasks << dag.add_task(Task, 'payload_2')
-        tasks[0].depends_on( tasks[1] )
+    before do
+      @tasks = []
+      @dag   = Dag.new do |dag|
+        @tasks << dag.add_task(Task, 'payload_1')
+        @tasks << dag.add_task(Task, 'payload_2')
+        @tasks << dag.add_task(Task, 'payload_3')
+        @tasks[0].depends_on(@tasks[1])
+        @tasks[0].depends_on(@tasks[2])
       end
+    end
 
-      dag.send(:instance_variable_get,:@tasks).should == tasks
-      tasks.first.dag_id.should == dag.unique_id
+    it "adds tasks that are associated with the dag" do
+      @dag.send(:instance_variable_get, :@tasks).should == @tasks
+      @tasks.first.dag_id.should == @dag.unique_id
+    end
 
+    it "maintains dependencies" do
+      @tasks.first.requirements.size.should == 2
+      @tasks.first.requirements.should == @tasks[1..2]
+    end
+
+  end
+
+  context "when constructed with nested blocks" do
+
+    before do
+      @dag   = Dag.new do |dag|
+        @task = dag.add_task(Task, 'payload_1') do |task|
+          task.depends_on(Task, 'payload_2')
+          task.depends_on(Task, 'payload_3')
+        end
+      end
+    end
+
+    it "adds tasks that are associated with the dag" do
+      @dag.send(:instance_variable_get, :@tasks).size.should == 3
+    end
+
+    it "maintains dependencies" do
+      @task.requirements.size.should == 2
+      @task.requirements.each do |t|
+        t.unique_id.should_not be_nil
+        t.unique_id.should_not == @task.unique_id
+      end
+    end
+
+    it "is properly persisted in Redis" do
+      dag = Dag.find( @dag.unique_id )
+      tasks = dag.send(:instance_variable_get, :@tasks).size.should == 3
+      task = tasks.find{|t| t.unique_id == @task.unique_id}
+      task.should_not be_nil
+      task.requirements.size.should == 2
+      task.requirements.each do |t|
+        t.unique_id.should_not be_nil
+        t.unique_id.should_not == @task.unique_id
+      end
     end
   end
 
@@ -200,9 +245,9 @@ describe Dag do
     end
 
     it "persists graph edges" do
-      key = @dag.send(:graph_key)
-      graph_json = Resque.redis.get( key )
-      graph = @dag.decode( graph_json )
+      key        = @dag.send(:graph_key)
+      graph_json = Resque.redis.get(key)
+      graph      = @dag.decode(graph_json)
       graph['edges'].should_not be_nil
       graph['edges'].should_not be_empty
     end
@@ -253,22 +298,22 @@ describe Dag do
 
   context "given a one-job dag" do
 
-    let(:job){ Task.new }
-    let(:dag){ Dag.new([job]) }
+    let(:job) { Task.new }
+    let(:dag) { Dag.new([job]) }
 
     context "when the job is completed" do
-      before { dag.completed( job.unique_id )}
+      before { dag.completed(job.unique_id) }
       it "reports that the job is complete" do
-        dag.should be_job_complete( job.unique_id )
+        dag.should be_job_complete(job.unique_id)
       end
     end
 
     context "when the job is not completed" do
       it "reports that the job is incomplete" do
-        dag.should_not be_job_complete( job.unique_id )
+        dag.should_not be_job_complete(job.unique_id)
       end
     end
-    
+
   end
 
 

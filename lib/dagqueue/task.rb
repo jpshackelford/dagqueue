@@ -39,6 +39,9 @@ module Dagqueue
 
     end
 
+    # Access to the parent DAG
+    attr_accessor :dag
+
     # The worker object which is currently processing this task.
     attr_accessor :worker
 
@@ -50,12 +53,12 @@ module Dagqueue
     attr_reader :queue
 
     def initialize(payload = { }, dag = nil)
-      raise ArgumentError,"payload must be a hash" unless payload.is_a?( Hash )
-
+      raise ArgumentError, "payload must be a hash" unless payload.is_a?(Hash)
+      
       @redis        = Resque.redis
-      @dag          = dag
       @payload      = payload
       @dependencies = Set.new
+      self.dag      = dag unless dag.nil?
     end
 
     def unique_id
@@ -66,20 +69,41 @@ module Dagqueue
       @unique_id
     end
 
-    def requires(*jobs)
-      jobs.flatten.each do |job|
-        raise(ArgumentError, "Must be a Dagqueue::Task") unless job.is_a?(Task)
-        @dependencies << job unless self == job
+    # Adds predecessors to this task.
+    # Call with an Array of Tasks or with a Task Class and payload such
+    # as would be accepted by Dag#add_task. Returns the new task object when
+    # instantiated from a class and payload, otherwise nil.
+    def requires(*tasks)
+      ftasks = tasks.flatten
+      if ftasks[0].is_a?(Class) && ftasks[0].ancestors.include?( Task )
+        task_class = tasks[0]
+        payload    = tasks[1..-1]
+        unless payload.empty?
+          task = self.dag.add_task(task_class, *payload)
+        else
+          task = self.dag.add_task(task_class)
+        end
+        self.depends_on( task )
+        return task
+      elsif ftasks[0].is_a?(Task)
+        ftasks.each do |task|
+          raise(ArgumentError, "Must be a Dagqueue::Task") unless task.is_a?(Task)
+          @dependencies << task unless self == task
+        end
+        return nil
+      else
+        raise ArgumentError, "First parameter must be a class or task."
       end
     end
 
     alias :depends_on :requires
-    
+
     def requirements
       @dependencies.to_a.freeze
     end
 
     def dag=(dag)
+      @dag = dag
       payload['dag_id'] = dag.unique_id
       payload['class'] = self.class.name unless payload.has_key?('class')
       @redis.set Task.job_key(unique_id), encode(payload)

@@ -65,9 +65,10 @@ module Dagqueue
       end
     end
 
-    def add_task(task_class = Task, args)
+    def add_task(task_class = Task, *args)
       new_task = task_class.new({:args => args}, self)
       @tasks << new_task
+      yield new_task if block_given?
       new_task
     end
 
