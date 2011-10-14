@@ -6,8 +6,9 @@ describe Dag do
 
   before(:each) do
     @tasks = Array.new(4) { Task.new }
-    @tasks[1].requires(@tasks.first)
-    @tasks[2].requires(@tasks.first)
+    @tasks.each{|t| t.unique_id}
+    @tasks[1].requires(@tasks[0])
+    @tasks[2].requires(@tasks[0])
   end
 
   shared_examples_for 'a Dag' do
@@ -23,10 +24,10 @@ describe Dag do
 
     it "has a graph of jobs" do
       graph = @dag.send(:graph)
-      graph.vertices.sort.should == @tasks.map { |j| j.unique_id }.sort
+      graph.vertices.size.should == 4
+      graph.vertices.sort.should == %w{1 2 3 4}
       edges = graph.edges.map { |e| e.to_a }
-      edges.should == [[@tasks[1].unique_id, @tasks[0].unique_id],
-                       [@tasks[2].unique_id, @tasks[0].unique_id]].sort
+      edges.should == [['2', '1'], ['3', '1']]
     end
 
     it "initially has same planned jobs as the vertices" do
@@ -129,7 +130,7 @@ describe Dag do
     end
 
     it "is complete when all jobs are complete" do
-      @tasks.map { |j| j.unique_id }.each { |j| @dag.completed(j) }
+      %w{1 2 3 4}.each { |j| @dag.completed(j) }
 
       # Be sure this works even when we don't rely on any state in Dag itself
       dag = Dag.find(@dag.unique_id)
@@ -162,65 +163,16 @@ describe Dag do
 
   end
 
-  context "when constructed with a block and depends_on" do
+  context "when constructed with a DSL" do
 
     before do
-      @tasks = []
-      @dag   = Dag.new do |dag|
-        @tasks << dag.add_task(Task, 'payload_1')
-        @tasks << dag.add_task(Task, 'payload_2')
-        @tasks << dag.add_task(Task, 'payload_3')
-        @tasks[0].depends_on(@tasks[1])
-        @tasks[0].depends_on(@tasks[2])
+      @dag = Dag.create do |dag|
+        tasks = Array.new(4) { dag.add_vertex }
+        dag.add_edges(tasks[1], tasks[0], tasks[2], tasks[0])
       end
     end
 
-    it "adds tasks that are associated with the dag" do
-      @dag.send(:instance_variable_get, :@tasks).should == @tasks
-      @tasks.first.dag_id.should == @dag.unique_id
-    end
-
-    it "maintains dependencies" do
-      @tasks.first.requirements.size.should == 2
-      @tasks.first.requirements.should == @tasks[1..2]
-    end
-
-  end
-
-  context "when constructed with nested blocks" do
-
-    before do
-      @dag   = Dag.new do |dag|
-        @task = dag.add_task(Task, 'payload_1') do |task|
-          task.depends_on(Task, 'payload_2')
-          task.depends_on(Task, 'payload_3')
-        end
-      end
-    end
-
-    it "adds tasks that are associated with the dag" do
-      @dag.send(:instance_variable_get, :@tasks).size.should == 3
-    end
-
-    it "maintains dependencies" do
-      @task.requirements.size.should == 2
-      @task.requirements.each do |t|
-        t.unique_id.should_not be_nil
-        t.unique_id.should_not == @task.unique_id
-      end
-    end
-
-    it "is properly persisted in Redis" do
-      dag = Dag.find( @dag.unique_id )
-      tasks = dag.send(:instance_variable_get, :@tasks).size.should == 3
-      task = tasks.find{|t| t.unique_id == @task.unique_id}
-      task.should_not be_nil
-      task.requirements.size.should == 2
-      task.requirements.each do |t|
-        t.unique_id.should_not be_nil
-        t.unique_id.should_not == @task.unique_id
-      end
-    end
+    it_behaves_like 'a Dag'
   end
 
   context "when constructed from an Array of jobs" do

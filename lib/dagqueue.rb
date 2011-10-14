@@ -10,20 +10,20 @@ require 'rgl/adjacency'
 # otherwise, don't mess with it'
 begin
 
-# project files
-  require 'dagqueue/task'
+  # project files
+  require 'dagqueue/redis_functions'
   require 'dagqueue/dag'
   require 'dagqueue/dag_queue'
+  require 'dagqueue/task'
   require 'dagqueue/worker'
 
-# augment Resque
-# NO MONKEY PATCHES!
+  # augment Resque
+  # NOT A MONKEY PATCH!
   require 'resque/job_queue'
 
-# patches
+  # patches
   require 'dagqueue/core/float'
 
-  
 rescue LoadError => e
   paths     = $LOAD_PATH.map { |p| File.expand_path(p) }
   this_path = File.expand_path('..', __FILE__)

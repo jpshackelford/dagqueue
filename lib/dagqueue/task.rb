@@ -75,17 +75,7 @@ module Dagqueue
     # instantiated from a class and payload, otherwise nil.
     def requires(*tasks)
       ftasks = tasks.flatten
-      if ftasks[0].is_a?(Class) && ftasks[0].ancestors.include?( Task )
-        task_class = tasks[0]
-        payload    = tasks[1..-1]
-        unless payload.empty?
-          task = self.dag.add_task(task_class, *payload)
-        else
-          task = self.dag.add_task(task_class)
-        end
-        self.depends_on( task )
-        return task
-      elsif ftasks[0].is_a?(Task)
+      if ftasks[0].is_a?(Task)
         ftasks.each do |task|
           raise(ArgumentError, "Must be a Dagqueue::Task") unless task.is_a?(Task)
           @dependencies << task unless self == task
@@ -160,11 +150,11 @@ module Dagqueue
     # arguments given in the payload.
     def perform
       dag      = Dag.find(dag_id)
-      job      = payload_class
-      job_args = args || []
+      task     = payload_class
+      task_args = args || []
 
       begin
-        job.perform(*job_args)
+        task.perform(*task_args)
         dag.completed(unique_id)
         return true # Return true if the job was performed
                     # If an exception occurs during the job execution re-raise.

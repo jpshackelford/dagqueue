@@ -2,20 +2,17 @@ module Dagqueue
 
   class Dag
 
-    CounterKey = 'dagq:dag:counter'
-    DagKey     = 'dagq:dag'
-
-    include Resque::Helpers
+    extend RedisFunctions::DagClassMethods
     extend Resque::Helpers
+
+    include RedisFunctions::DagInstanceMethods
+    include Resque::Helpers
+
 
     class << self
 
-      def redis_key(unique_id)
-        "#{DagKey}:#{unique_id}"
-      end
-
       def graph_key(unique_id)
-        "#{redis_key(unique_id)}:graph"
+        "#{key(unique_id)}:graph"
       end
 
       def find(unique_id)
@@ -28,48 +25,63 @@ module Dagqueue
         graph_hash = JSON.parse(json)
         init_hash  = { 'unique_id' => unique_id }
         init_hash.merge!(graph_hash)
-
+        # Need new pattern for creating.
+        # vertices, edges, queue, unique_id
+        # could also be hash with the above as keys, as today.
+        # Note format of vertices is different--doesn't include payloads
         return new(init_hash)
+      end
+
+      def create(vertices = nil, edges = [], queue = 'default', &block)
+
+        if block_given?
+          unique_id = self.new_id
+          puts "--> Dag unique_id #{unique_id}"
+          register(unique_id)
+          dag = new(unique_id)
+          dag.create_tasks &block
+
+          # what about the queue param?
+          return dag
+        end
+
+        # All this will probably go away once block syntax works.
+        raise ArgumentError, "vertices must be a Hash" unless vertices.is_a?(Hash)
+
+        raise ArgumentError, "edges must be an Array" unless edges.is_a?(Array)
+
+        unique_id = self.new_id
+        register(unique_id)
+
+        return new(unique_id)
       end
     end
 
-    def initialize(jobs = [], queue_name = 'default')
+    def initialize(tasks = [], queue_name = 'default')
 
       @redis = Resque.redis
 
       # Users initialize with an array of jobs
-      if jobs.is_a?(Array)
+      if tasks.is_a?(String) || tasks.is_a?(Fixnum)
+        @unique_id = tasks.to_s
 
-        if jobs.empty?
-          @tasks = []
-          yield self if block_given?
-        else
-          @tasks = jobs
-        end
-
+      elsif tasks.is_a?(Array)
         @queue = queue_name
-
+        @tasks = tasks
         init_redis
 
         # We initialize a Dag which has already been persisted
         # e.g. from Dag.find, etc. with a Hash
-      elsif jobs.is_a?(Hash)
-        jobs.each_pair do |var, value|
+      elsif tasks.is_a?(Hash)
+        tasks.each_pair do |var, value|
           instance_variable_set("@#{var}".to_sym, value)
         end
 
       else
         raise ArgumentError,
               "Dag must be initialized with an Array or Hash. " \
-              "Received #{jobs.class} instead."
+              "Received #{tasks.class} instead."
       end
-    end
-
-    def add_task(task_class = Task, *args)
-      new_task = task_class.new({:args => args}, self)
-      @tasks << new_task
-      yield new_task if block_given?
-      new_task
     end
 
     def init_redis
@@ -78,7 +90,7 @@ module Dagqueue
         @redis.sadd planned_key, task.unique_id
       end
       @redis.set graph_key, graph_json
-      @redis.sadd "#{DagKey}s", unique_id
+      @redis.sadd RedisFunctions::LIST, unique_id
     end
 
     private :init_redis
@@ -88,13 +100,12 @@ module Dagqueue
       sweep_graph
 
       # Look for jobs without dependencies
-      jobs_no_reqs = graph.vertices.select { |v| graph.out_degree(v) == 0 }
+      tasks_no_reqs = graph.vertices.select { |v| graph.out_degree(v) == 0 }
 
       # Only work a job in the planning set. This is atomic and safe for concurrency.
-      jobs_no_reqs.find do |job_id|
-        @redis.smove(planned_key, working_key, job_id)
+      tasks_no_reqs.find do |task_id|
+        work_task task_id
       end
-
     end
 
     def completed(*job_ids)
@@ -133,12 +144,8 @@ module Dagqueue
     end
 
     def complete?
-      # TODO this doesn't properly handle the case where every node needs to complete
-      # a final task.
-      sweep_graph
       @redis.scard(planned_key) == 0 &&
-          @redis.scard(working_key) == 0 &&
-          graph.vertices.empty?
+      @redis.scard(working_key) == 0
     end
 
     def percent_complete
@@ -151,7 +158,8 @@ module Dagqueue
       elsif @vertices
         return @vertices.dup.freeze
       else
-        raise "Dag was deserialized or constructed improperly."
+        # This is the future all other branches will go away
+        return tasks
       end
     end
 
@@ -161,8 +169,7 @@ module Dagqueue
 
     def unique_id
       unless @unique_id
-        @redis.setnx(CounterKey, 0)
-        @unique_id = @redis.incrby(CounterKey, 1).to_s
+        @unique_id = Dag.new_id
       end
       @unique_id
     end
@@ -179,7 +186,9 @@ module Dagqueue
 
     private
 
+
     def sweep_graph
+
       @previously_completed ||= []
       newly_complete        = @redis.smembers(complete_key) - @previously_completed
       newly_complete.each do |v|
@@ -188,36 +197,32 @@ module Dagqueue
       @previously_completed += newly_complete
     end
 
-    def redis_key
-      Dag.redis_key(unique_id)
-    end
-
     def graph_key
-      "#{redis_key}:graph"
+      "#{key}:graph"
     end
 
     def planned_key
-      "#{redis_key}:planned"
+      "#{key}:tasks_planned"
     end
 
     def working_key
-      "#{redis_key}:working"
+      "#{key}:tasks_working"
     end
 
     def complete_key
-      "#{redis_key}:complete"
+      "#{key}:tasks_complete"
     end
 
     def skipped_key
-      "#{redis_key}:skipped"
+      "#{key}:task_skipped"
     end
 
     def succeeded_key
-      "#{redis_key}:succeeded"
+      "#{key}:tasks_succeeded"
     end
 
     def failed_key
-      "#{redis_key}:failed"
+      "#{key}:tasks_failed"
     end
 
     def graph_json
@@ -231,8 +236,11 @@ module Dagqueue
       unless @graph
         if @tasks
           @graph = graph_from_objects
-        else
+        elsif @edges
           @graph = graph_from_ids
+        else
+          # This is the future, other branches will be deprecated
+          @graph = rgl_from_redis
         end
       end
       @graph
